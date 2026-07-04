@@ -53,7 +53,7 @@ const getBatteryInfo = (): BatteryInfo => {
     const raw = execSync('dumpsys battery', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
     const match = raw.toString().match(/level:\s*(\d+)/);
     if (match) {
-      info.percent = parseInt(match[1], 10);
+      info.percent = parseInt(match[1]!, 10);
       const acMatch = raw.toString().match(/AC powered:\s*(true|false)/);
       const usbMatch = raw.toString().match(/USB powered:\s*(true|false)/);
       const wirelessMatch = raw.toString().match(/Wireless powered:\s*(true|false)/);
@@ -72,15 +72,15 @@ const getBatteryInfo = (): BatteryInfo => {
     if (lines.length > 1 && lines[1]) {
         const parts = lines[1].trim().split(/\s+/);
         if (parts.length >= 2) {
-            const status = parseInt(parts[0], 10);
-            const pct = parseInt(parts[1], 10);
+            const status = parseInt(parts[0]!, 10);
+            const pct = parseInt(parts[1]!, 10);
             if (!isNaN(pct)) {
                 info.percent = pct;
                 info.charging = status === 2;
                 return info;
             }
         } else {
-            const pct = parseInt(parts[0], 10);
+            const pct = parseInt(parts[0]!, 10);
             if (!isNaN(pct)) {
                info.percent = pct;
                return info;
@@ -94,8 +94,8 @@ const getBatteryInfo = (): BatteryInfo => {
     const raw = execSync('pmset -g batt', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
     const match = raw.toString().match(/(\d+)%;\s*(charging|discharging|AC attached)/i);
     if (match) {
-        info.percent = parseInt(match[1], 10);
-        info.charging = match[2].toLowerCase().includes('charging') || match[2].toLowerCase().includes('ac');
+        info.percent = parseInt(match[1]!, 10);
+        info.charging = match[2]!.toLowerCase().includes('charging') || match[2]!.toLowerCase().includes('ac');
         return info;
     }
   } catch {}
