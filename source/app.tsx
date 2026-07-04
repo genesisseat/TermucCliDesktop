@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {Box, Text, useInput, useApp} from 'ink';
+import {Box, Text, useInput, useApp, useStdout} from 'ink';
 import fs from 'fs';
 import path from 'path';
 import {Header} from './components/Header.js';
@@ -15,16 +15,11 @@ const palettes = {
 const HOME = process.env['HOME'] || process.cwd();
 const SETTINGS_FILE = path.join(HOME, '.jellybean_settings');
 
-// Termux exposes phone storage here after `termux-setup-storage` is run once.
-// Fall back to HOME if that symlink doesn't exist yet (e.g. permission not granted).
 const STORAGE_ROOT = fs.existsSync(path.join(HOME, 'storage', 'shared'))
   ? path.join(HOME, 'storage', 'shared')
   : HOME;
 
-type FileEntry = {
-  name: string;
-  isDir: boolean;
-};
+type FileEntry = { name: string; isDir: boolean };
 
 function loadDirectory(dirPath: string): { entries: FileEntry[]; error: string | null } {
   try {
@@ -32,20 +27,12 @@ function loadDirectory(dirPath: string): { entries: FileEntry[]; error: string |
     const entries: FileEntry[] = raw
       .map((d) => {
         let isDir = d.isDirectory();
-        // Follow symlinks (Termux storage entries are often symlinks)
         if (d.isSymbolicLink()) {
-          try {
-            isDir = fs.statSync(path.join(dirPath, d.name)).isDirectory();
-          } catch {
-            isDir = false;
-          }
+          try { isDir = fs.statSync(path.join(dirPath, d.name)).isDirectory(); } catch { isDir = false; }
         }
         return { name: d.name, isDir };
       })
-      .sort((a, b) => {
-        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
+      .sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name)));
     return { entries, error: null };
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown error';
@@ -53,8 +40,25 @@ function loadDirectory(dirPath: string): { entries: FileEntry[]; error: string |
   }
 }
 
+// Truncate a string to fit maxLen, adding an ellipsis if cut off.
+// Keeps the file extension visible where possible (e.g. "long-name-here....zip").
+function truncateName(name: string, maxLen: number): string {
+  if (name.length <= maxLen) return name;
+  if (maxLen <= 3) return name.slice(0, maxLen);
+
+  const ext = path.extname(name);
+  const hasUsableExt = ext.length > 0 && ext.length < maxLen - 4;
+
+  if (hasUsableExt) {
+    const keep = maxLen - ext.length - 3; // 3 chars for "..."
+    return `${name.slice(0, keep)}...${ext}`;
+  }
+  return `${name.slice(0, maxLen - 3)}...`;
+}
+
 export default function App() {
   const {exit} = useApp();
+  const {stdout} = useStdout();
   const [selected, setSelected] = useState(1);
   const [view, setView] = useState<'main' | 'settings' | 'files'>('main');
 
@@ -64,9 +68,7 @@ export default function App() {
         const raw = fs.readFileSync(SETTINGS_FILE, 'utf8').trim();
         if (raw in palettes) return raw;
       }
-    } catch {
-      // fall through to default
-    }
+    } catch {}
     return 'GPT';
   });
 
@@ -77,11 +79,21 @@ export default function App() {
   const mainMenuItems = ['File Manager', 'System Stats', 'Settings', 'Exit'];
   const settingsItems = ['Palette: GPT', 'Palette: CLAUDE', 'Palette: SAKURA', 'Palette: ROSE', 'Palette: RAIN', 'Back'];
 
+  // Terminal width minus borders/padding (2 border chars + 2 padding = ~4),
+  // minus the "> [ 99 ] " prefix (~10 chars), minus a small safety margin.
+  const terminalWidth = stdout?.columns || 80;
+  const prefixWidth = 10; // "> [ 99 ] " or "  [ 99 ] "
+  const maxNameLength = Math.max(10, terminalWidth - prefixWidth - 4);
+
   const fileMenuItems = (() => {
     const items: string[] = [];
     if (currentPath !== path.parse(currentPath).root) items.push('.. (up)');
     for (const entry of dirState.entries) {
-      items.push(entry.isDir ? `[DIR]  ${entry.name}` : `       ${entry.name}`);
+      const label = entry.isDir ? `[DIR] ${entry.name}` : entry.name;
+      const truncated = entry.isDir
+        ? `[DIR] ${truncateName(entry.name, maxNameLength - 6)}`
+        : truncateName(entry.name, maxNameLength);
+      items.push(truncated);
     }
     items.push('Back to Menu');
     return items;
@@ -94,11 +106,7 @@ export default function App() {
 
   const updatePalette = (newPalette: string) => {
     setPalette(newPalette);
-    try {
-      fs.writeFileSync(SETTINGS_FILE, newPalette);
-    } catch {
-      // Non-fatal: theme still applies for this session even if it can't be saved.
-    }
+    try { fs.writeFileSync(SETTINGS_FILE, newPalette); } catch {}
   };
 
   const enterFileManager = () => {
@@ -109,13 +117,10 @@ export default function App() {
     setSelected(1);
   };
 
-  const navigateInto = (name: string) => {
-    const nextPath = path.join(currentPath, name);
+  const navigateInto = (originalName: string) => {
+    const nextPath = path.join(currentPath, originalName);
     const result = loadDirectory(nextPath);
-    if (result.error) {
-      setFileStatus(result.error);
-      return; // stay put, just show the error
-    }
+    if (result.error) { setFileStatus(result.error); return; }
     setCurrentPath(nextPath);
     setDirState(result);
     setFileStatus(null);
@@ -131,11 +136,11 @@ export default function App() {
     setSelected(1);
   };
 
-  const inspectFile = (name: string) => {
+  const inspectFile = (originalName: string) => {
     try {
-      const stats = fs.statSync(path.join(currentPath, name));
+      const stats = fs.statSync(path.join(currentPath, originalName));
       const kb = (stats.size / 1024).toFixed(1);
-      setFileStatus(`${name} — ${kb} KB — modified ${stats.mtime.toLocaleDateString()}`);
+      setFileStatus(`${truncateName(originalName, maxNameLength)} — ${kb} KB — modified ${stats.mtime.toLocaleDateString()}`);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
       setFileStatus(`Cannot read file: ${message}`);
@@ -147,38 +152,35 @@ export default function App() {
     if (key.downArrow && selected < currentItems.length) setSelected(selected + 1);
 
     if (key.return) {
-      const selectedItem = currentItems[selected - 1];
-      if (!selectedItem) return;
+      const selectedIndex = selected - 1;
+      const selectedLabel = currentItems[selectedIndex];
+      if (!selectedLabel) return;
 
       if (view === 'main') {
-        if (selectedItem === 'File Manager') enterFileManager();
-        if (selectedItem === 'Settings') { setView('settings'); setSelected(1); }
-        if (selectedItem === 'Exit') exit();
+        if (selectedLabel === 'File Manager') enterFileManager();
+        if (selectedLabel === 'Settings') { setView('settings'); setSelected(1); }
+        if (selectedLabel === 'Exit') exit();
       } else if (view === 'settings') {
-        if (selectedItem.startsWith('Palette: ')) {
-          updatePalette(selectedItem.replace('Palette: ', ''));
-        }
-        if (selectedItem === 'Back') { setView('main'); setSelected(1); }
+        if (selectedLabel.startsWith('Palette: ')) updatePalette(selectedLabel.replace('Palette: ', ''));
+        if (selectedLabel === 'Back') { setView('main'); setSelected(1); }
       } else if (view === 'files') {
-        if (selectedItem === 'Back to Menu') {
-          setView('main');
-          setFileStatus(null);
-          setSelected(3); // land back on "Settings" position isn't guaranteed; reset to top instead
-          setSelected(1);
-        } else if (selectedItem === '.. (up)') {
+        // Use the ORIGINAL (untruncated) entry, not the display label, for filesystem ops.
+        const hasUpRow = currentPath !== path.parse(currentPath).root;
+        if (selectedLabel === 'Back to Menu') {
+          setView('main'); setFileStatus(null); setSelected(1);
+        } else if (selectedLabel === '.. (up)') {
           navigateUp();
-        } else if (selectedItem.startsWith('[DIR]')) {
-          navigateInto(selectedItem.replace('[DIR]  ', ''));
         } else {
-          inspectFile(selectedItem.replace(/^\s+/, ''));
+          const entryIndex = hasUpRow ? selectedIndex - 1 : selectedIndex;
+          const entry = dirState.entries[entryIndex];
+          if (!entry) return;
+          if (entry.isDir) navigateInto(entry.name);
+          else inspectFile(entry.name);
         }
       }
     }
 
-    // Backspace as a quick "go up" shortcut while browsing
-    if (view === 'files' && key.backspace) {
-      navigateUp();
-    }
+    if (view === 'files' && key.backspace) navigateUp();
   });
 
   return (
@@ -186,21 +188,19 @@ export default function App() {
       <Header />
       {view === 'files' && (
         <Box paddingX={1}>
-          <Text color={currentTheme.primary}>{currentPath}</Text>
+          <Text color={currentTheme.primary}>{truncateName(currentPath, maxNameLength + 6)}</Text>
         </Box>
       )}
       <Box flexDirection="column" flexGrow={1} paddingY={view === 'files' ? 1 : 5} paddingX={1}>
-        {dirState.error && view === 'files' && (
-          <Text color="red">{dirState.error}</Text>
-        )}
+        {dirState.error && view === 'files' && <Text color="red">{dirState.error}</Text>}
         {currentItems.map((item, index) => (
-          <Text key={`${item}-${index}`} color={selected === index + 1 ? currentTheme.accent : 'white'}>
+          <Text key={`${item}-${index}`} wrap="truncate-end" color={selected === index + 1 ? currentTheme.accent : 'white'}>
             {selected === index + 1 ? '> ' : '  '} [ {index + 1} ] {item}
           </Text>
         ))}
       </Box>
       <Box borderStyle="single" paddingX={1} borderColor={currentTheme.primary}>
-        <Text color={currentTheme.accent}>
+        <Text wrap="truncate-end" color={currentTheme.accent}>
           {view === 'files' && fileStatus
             ? fileStatus
             : `Theme: ${palette} | Selected: ${currentItems[selected - 1] ?? ''}`}
