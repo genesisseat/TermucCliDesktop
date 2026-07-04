@@ -3,60 +3,108 @@ import { Box, Text } from 'ink';
 import fs from 'fs';
 import { execSync } from 'child_process';
 
-const getBattery = (): string => {
-  // Generic Linux/Android sysfs check (check multiple possible dirs)
+type BatteryInfo = { percent: number | null; charging: boolean | null; error: string | null };
+
+const getBatteryInfo = (): BatteryInfo => {
+  const info: BatteryInfo = { percent: null, charging: null, error: null };
+
+  // 1. Termux
+  try {
+    const raw = execSync('termux-battery-status', { encoding: 'utf8', timeout: 2000, stdio: 'pipe' });
+    const data = JSON.parse(raw.toString());
+    if (data && typeof data.percentage === 'number') {
+      info.percent = data.percentage;
+      if (typeof data.status === 'string') {
+        info.charging = data.status.toUpperCase() === 'CHARGING' || data.status.toUpperCase() === 'FULL';
+      } else if (data.plugged) {
+         info.charging = data.plugged !== 'UNPLUGGED';
+      }
+      return info;
+    }
+  } catch (e) {
+    info.error = 'termux-api failed';
+  }
+
+  // 2. Generic Linux/Android sysfs
   try {
     if (fs.existsSync('/sys/class/power_supply')) {
       const dirs = fs.readdirSync('/sys/class/power_supply');
       for (const dir of dirs) {
         if (dir.toLowerCase().includes('bat') || dir.toLowerCase().includes('bms') || dir.toLowerCase().includes('main')) {
           try {
-            const capacity = fs.readFileSync(`/sys/class/power_supply/${dir}/capacity`, 'utf8').trim();
-            if (capacity && !isNaN(Number(capacity))) return `${capacity}%`;
+            const capStr = fs.readFileSync(`/sys/class/power_supply/${dir}/capacity`, 'utf8').trim();
+            const cap = parseInt(capStr, 10);
+            if (!isNaN(cap)) {
+              info.percent = cap;
+              try {
+                const statusStr = fs.readFileSync(`/sys/class/power_supply/${dir}/status`, 'utf8').trim().toLowerCase();
+                info.charging = statusStr === 'charging' || statusStr === 'full';
+              } catch {}
+              return info;
+            }
           } catch {}
         }
       }
     }
   } catch {}
 
-  // Termux
-  try {
-    const raw = execSync('termux-battery-status', { encoding: 'utf8', timeout: 2000, stdio: 'pipe' });
-    const data = JSON.parse(raw.toString());
-    if (data && typeof data.percentage === 'number') {
-      return `${data.percentage}%`;
-    }
-  } catch {}
-
-  // Android dumpsys fallback
+  // 3. Android dumpsys
   try {
     const raw = execSync('dumpsys battery', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
     const match = raw.toString().match(/level:\s*(\d+)/);
-    if (match) return `${match[1]}%`;
-  } catch {}
-  
-  // Windows
-  try {
-    const raw = execSync('WMIC PATH Win32_Battery Get EstimatedChargeRemaining', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
-    const lines = raw.toString().trim().split('\n');
-    if (lines.length > 1 && lines[1]) {
-        const pct = lines[1].trim();
-        if (pct && !isNaN(Number(pct))) return `${pct}%`;
+    if (match) {
+      info.percent = parseInt(match[1], 10);
+      const acMatch = raw.toString().match(/AC powered:\s*(true|false)/);
+      const usbMatch = raw.toString().match(/USB powered:\s*(true|false)/);
+      const wirelessMatch = raw.toString().match(/Wireless powered:\s*(true|false)/);
+      const isAc = acMatch && acMatch[1] === 'true';
+      const isUsb = usbMatch && usbMatch[1] === 'true';
+      const isWireless = wirelessMatch && wirelessMatch[1] === 'true';
+      info.charging = isAc || isUsb || isWireless;
+      return info;
     }
   } catch {}
   
-  // macOS
+  // 4. Windows
+  try {
+    const raw = execSync('WMIC PATH Win32_Battery Get EstimatedChargeRemaining, BatteryStatus', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
+    const lines = raw.toString().trim().split('\n');
+    if (lines.length > 1 && lines[1]) {
+        const parts = lines[1].trim().split(/\s+/);
+        if (parts.length >= 2) {
+            const status = parseInt(parts[0], 10);
+            const pct = parseInt(parts[1], 10);
+            if (!isNaN(pct)) {
+                info.percent = pct;
+                info.charging = status === 2;
+                return info;
+            }
+        } else {
+            const pct = parseInt(parts[0], 10);
+            if (!isNaN(pct)) {
+               info.percent = pct;
+               return info;
+            }
+        }
+    }
+  } catch {}
+  
+  // 5. macOS
   try {
     const raw = execSync('pmset -g batt', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
-    const match = raw.toString().match(/(\d+)%/);
-    if (match) return `${match[1]}%`;
+    const match = raw.toString().match(/(\d+)%;\s*(charging|discharging|AC attached)/i);
+    if (match) {
+        info.percent = parseInt(match[1], 10);
+        info.charging = match[2].toLowerCase().includes('charging') || match[2].toLowerCase().includes('ac');
+        return info;
+    }
   } catch {}
 
-  return 'N/A';
+  return info;
 };
 
 export const Header = () => {
-  const [battery, setBattery] = useState('...');
+  const [batteryInfo, setBatteryInfo] = useState<BatteryInfo>({ percent: null, charging: null, error: null });
   const [time, setTime] = useState('');
 
   useEffect(() => {
@@ -71,11 +119,11 @@ export const Header = () => {
     };
     
     updateTime();
-    setBattery(getBattery());
+    setBatteryInfo(getBatteryInfo());
 
     const timeInterval = setInterval(updateTime, 10000);
     const battInterval = setInterval(() => {
-      setBattery(getBattery());
+      setBatteryInfo(getBatteryInfo());
     }, 60000);
 
     return () => {
@@ -90,12 +138,12 @@ export const Header = () => {
     return '█'.repeat(filled) + '░'.repeat(Math.max(0, width - filled));
   }
 
-  let batteryDisplay = `BAT: ${battery}`;
-  if (battery !== 'N/A' && battery !== '...') {
-    const pct = parseInt(battery.replace('%', ''), 10);
-    if (!isNaN(pct)) {
-      batteryDisplay = `BAT: ${barGraph(pct, 10)} ${battery}`;
-    }
+  let batteryDisplay = `BAT: N/A`;
+  if (batteryInfo.percent !== null) {
+    const icon = batteryInfo.charging ? '⚡' : '';
+    batteryDisplay = `BAT: ${icon}${barGraph(batteryInfo.percent, 10)} ${batteryInfo.percent}%`;
+  } else if (batteryInfo.error === 'termux-api failed') {
+    batteryDisplay = `BAT: ERR (pkg install termux-api?)`;
   }
 
   return (
