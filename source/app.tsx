@@ -7,11 +7,18 @@ import {execSync} from 'child_process';
 import {Header} from './components/Header.js';
 
 const palettes = {
-  GPT: { primary: 'green', accent: 'cyan' },
-  CLAUDE: { primary: 'orange', accent: 'yellow' },
-  SAKURA: { primary: 'magenta', accent: 'red' },
-  ROSE: { primary: 'red', accent: 'white' },
-  RAIN: { primary: 'blue', accent: 'magenta' },
+  GPT:     { primary: '#10A37F', accent: '#00D9C0' }, // teal-green, GPT-ish
+  CLAUDE:  { primary: '#DA7756', accent: '#F0C674' }, // warm coral / soft gold — better contrast than orange/yellow
+  SAKURA:  { primary: '#FF6FA5', accent: '#FFD6E8' }, // cherry blossom pink / pale pink
+  ROSE:    { primary: '#E8384F', accent: '#FFB6C1' }, // deep rose / light pink (was red/white — too stark)
+  RAIN:    { primary: '#4A90D9', accent: '#8FD3FE' }, // rain blue / sky blue (was blue/magenta — mismatched mood)
+  MATRIX:  { primary: '#00FF41', accent: '#003B00' }, // classic terminal green on dark green
+  MIDNIGHT:{ primary: '#5C6BC0', accent: '#B39DDB' }, // indigo / lavender
+  SUNSET:  { primary: '#FF7E5F', accent: '#FEB47B' }, // orange-red / peach gradient feel
+  MONO:    { primary: '#CCCCCC', accent: '#FFFFFF' }, // grayscale, minimal
+  AMBER:   { primary: '#FFB000', accent: '#664400' }, // old-school amber terminal
+  CYBER:   { primary: '#F72585', accent: '#4CC9F0' }, // cyberpunk pink / cyan
+  FOREST:  { primary: '#2D6A4F', accent: '#95D5B2' }, // deep green / mint
 };
 
 const HOME = process.env['HOME'] || process.cwd();
