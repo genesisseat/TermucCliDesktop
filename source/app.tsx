@@ -1,14 +1,20 @@
 import React, {useState} from 'react';
-import {Box, Text, useInput} from 'ink';
+import {Box, Text, useInput, useApp} from 'ink';
 import {Header} from './components/Header.js';
 
 export default function App() {
+  const {exit} = useApp();
   const [selected, setSelected] = useState(1);
-  const menuItems = ['File Manager', 'System Stats', 'Terminal Log', 'Settings'];
+  const menuItems = ['File Manager', 'System Stats', 'Terminal Log', 'Settings', 'Exit'];
 
   useInput((_, key) => {
     if (key.upArrow && selected > 1) setSelected(selected - 1);
     if (key.downArrow && selected < menuItems.length) setSelected(selected + 1);
+    
+    // Trigger Exit when Enter is pressed on the 'Exit' item
+    if (key.return && menuItems[selected - 1] === 'Exit') {
+      exit();
+    }
   });
 
   return (
