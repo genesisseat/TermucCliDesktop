@@ -247,6 +247,55 @@ function killProcess(pid: string): { success: boolean; message: string } {
   }
 }
 
+// --- Wi-Fi helpers --------------------------------------------------------
+
+type WifiNetwork = { ssid: string; level: number; auth: string };
+
+export function parseWifiScanOutput(raw: string): WifiNetwork[] {
+  try {
+    const parsed = JSON.parse(raw.trim());
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+      .map((entry) => ({
+        ssid: typeof entry['ssid'] === 'string' ? entry['ssid'] : 'Unknown',
+        level: typeof entry['level'] === 'number' ? entry['level'] : 0,
+        auth: typeof entry['auth'] === 'string' ? entry['auth'] : 'Open',
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function listWifiNetworks(): { networks: WifiNetwork[]; error: string | null } {
+  try {
+    const raw = execSync('termux-wifi-scaninfo', { encoding: 'utf8', timeout: 4000 });
+    const networks = parseWifiScanOutput(raw);
+    return { networks, error: networks.length ? null : 'No Wi-Fi networks found' };
+  } catch {
+    return { networks: [], error: 'Wi-Fi scan unavailable. Install termux-api or check permissions.' };
+  }
+}
+
+function toggleWifi(enabled: boolean): { success: boolean; message: string } {
+  try {
+    execSync(enabled ? 'termux-wifi-enable' : 'termux-wifi-disable', { encoding: 'utf8', timeout: 4000 });
+    return { success: true, message: enabled ? 'Wi-Fi enabled' : 'Wi-Fi disabled' };
+  } catch {
+    return { success: false, message: 'Unable to toggle Wi-Fi' };
+  }
+}
+
+function connectToWifi(ssid: string, password?: string): { success: boolean; message: string } {
+  try {
+    const command = password ? `termux-wifi-connect ${ssid} ${password}` : `termux-wifi-connect ${ssid}`;
+    execSync(command, { encoding: 'utf8', timeout: 6000 });
+    return { success: true, message: `Connecting to ${ssid}` };
+  } catch {
+    return { success: false, message: `Unable to connect to ${ssid}` };
+  }
+}
+
 // --- App Launcher helpers ---------------------------------------------------
 
 type LaunchableApp = { name: string; package: string };
@@ -291,7 +340,7 @@ function launchApp(pkg: string): { success: boolean; message: string } {
 
 // ---------------------------------------------------------------------------
 
-type View = 'main' | 'settings' | 'files' | 'stats' | 'tasks' | 'launcher';
+type View = 'main' | 'settings' | 'settings-themes' | 'settings-wifi' | 'files' | 'stats' | 'tasks' | 'launcher';
 
 export default function App() {
   const {exit} = useApp();
@@ -323,6 +372,10 @@ export default function App() {
   const [taskStatus, setTaskStatus] = useState<string | null>(null);
 
   const [launcherStatus, setLauncherStatus] = useState<string | null>(null);
+  const [wifiStatus, setWifiStatus] = useState<string | null>(null);
+  const [wifiNetworks, setWifiNetworks] = useState<WifiNetwork[]>([]);
+  const [wifiError, setWifiError] = useState<string | null>(null);
+  const [selectedWifiSsid, setSelectedWifiSsid] = useState<string | null>(null);
 
   useEffect(() => {
     if (view !== 'stats') return;
@@ -346,8 +399,9 @@ export default function App() {
   }, [view, pendingKill]);
 
   const mainMenuItems = ['File Manager', 'System Stats', 'Task Manager', 'App Launcher', 'Settings', 'Exit'];
-  // Generated from `palettes` so every theme you add automatically appears here.
-  const settingsItems = [...Object.keys(palettes).map((name) => `Palette: ${name}`), 'Back'];
+  const settingsItems = ['Themes', 'Wi-Fi', 'Back'];
+  const themeItems = [...Object.keys(palettes).map((name) => `Palette: ${name}`), 'Back'];
+  const wifiItems = ['Scan Wi-Fi', 'Turn Wi-Fi On', 'Turn Wi-Fi Off', 'Connect to Selected', 'Back'];
   const statsMenuItems = ['Back to Menu'];
   const launcherItems = [...LAUNCHABLE_APPS.map((a) => a.name), 'Back to Menu'];
 
@@ -383,6 +437,8 @@ export default function App() {
   const currentItems =
     view === 'main' ? mainMenuItems :
     view === 'settings' ? settingsItems :
+    view === 'settings-themes' ? themeItems :
+    view === 'settings-wifi' ? wifiItems :
     view === 'stats' ? statsMenuItems :
     view === 'tasks' ? taskMenuItems :
     view === 'launcher' ? launcherItems :
@@ -424,6 +480,18 @@ export default function App() {
   const enterLauncher = () => {
     setView('launcher');
     setLauncherStatus(null);
+    setSelected(1);
+  };
+
+  const openSettingsThemes = () => {
+    setView('settings-themes');
+    setSelected(1);
+  };
+
+  const openSettingsWifi = () => {
+    setView('settings-wifi');
+    setWifiStatus(null);
+    setWifiError(null);
     setSelected(1);
   };
 
@@ -474,8 +542,37 @@ export default function App() {
         if (selectedLabel === 'Settings') { setView('settings'); setSelected(1); }
         if (selectedLabel === 'Exit') exit();
       } else if (view === 'settings') {
-        if (selectedLabel.startsWith('Palette: ')) updatePalette(selectedLabel.replace('Palette: ', ''));
+        if (selectedLabel === 'Themes') openSettingsThemes();
+        if (selectedLabel === 'Wi-Fi') openSettingsWifi();
         if (selectedLabel === 'Back') { setView('main'); setSelected(1); }
+      } else if (view === 'settings-themes') {
+        if (selectedLabel.startsWith('Palette: ')) updatePalette(selectedLabel.replace('Palette: ', ''));
+        if (selectedLabel === 'Back') { setView('settings'); setSelected(1); }
+      } else if (view === 'settings-wifi') {
+        if (selectedLabel === 'Scan Wi-Fi') {
+          const result = listWifiNetworks();
+          setWifiNetworks(result.networks);
+          setWifiError(result.error);
+          setSelectedWifiSsid(result.networks[0]?.ssid ?? null);
+          setWifiStatus(result.error ? result.error : `Scanned ${result.networks.length} networks`);
+        }
+        if (selectedLabel === 'Turn Wi-Fi On') {
+          const result = toggleWifi(true);
+          setWifiStatus(result.message);
+        }
+        if (selectedLabel === 'Turn Wi-Fi Off') {
+          const result = toggleWifi(false);
+          setWifiStatus(result.message);
+        }
+        if (selectedLabel === 'Connect to Selected') {
+          if (!selectedWifiSsid) {
+            setWifiStatus('No network selected. Scan first.');
+          } else {
+            const result = connectToWifi(selectedWifiSsid);
+            setWifiStatus(result.message);
+          }
+        }
+        if (selectedLabel === 'Back') { setView('settings'); setSelected(1); }
       } else if (view === 'stats') {
         if (selectedLabel === 'Back to Menu') { setView('main'); setSelected(1); }
       } else if (view === 'tasks') {
@@ -626,6 +723,38 @@ export default function App() {
             </Text>
           ))}
         </Box>
+      ) : view === 'settings-wifi' ? (
+        <Box flexDirection="column" flexGrow={1} paddingY={1} paddingX={1}>
+          <Text color={currentTheme.primary} bold>Wi-Fi</Text>
+          <Text>{wifiStatus ?? 'Use Scan Wi-Fi to discover nearby networks'}</Text>
+          {wifiError && <Text color="red">{wifiError}</Text>}
+          {wifiNetworks.map((network, index) => {
+            const isSelected = selectedWifiSsid === network.ssid;
+            return (
+              <Text key={`${network.ssid}-${index}`} wrap="truncate-end" color={isSelected ? currentTheme.accent : 'white'}>
+                - {network.ssid} ({network.level} dBm, {network.auth}){isSelected ? ' [selected]' : ''}
+              </Text>
+            );
+          })}
+          <Text color="gray">Press Enter on Connect to Selected after scanning.</Text>
+          <Box marginTop={1}>
+            {currentItems.map((item, index) => (
+              <Text key={`${item}-${index}`} wrap="truncate-end" color={selected === index + 1 ? currentTheme.accent : 'white'}>
+                {selected === index + 1 ? '> ' : '  '} [ {index + 1} ] {item}
+              </Text>
+            ))}
+          </Box>
+        </Box>
+      ) : view === 'settings-themes' ? (
+        <Box flexDirection="column" flexGrow={1} paddingY={1} paddingX={1}>
+          <Text color={currentTheme.primary} bold>Themes</Text>
+          <Text>Select a palette for the UI.</Text>
+          {currentItems.map((item, index) => (
+            <Text key={`${item}-${index}`} wrap="truncate-end" color={selected === index + 1 ? currentTheme.accent : 'white'}>
+              {selected === index + 1 ? '> ' : '  '} [ {index + 1} ] {item}
+            </Text>
+          ))}
+        </Box>
       ) : (
         <Box flexDirection="column" flexGrow={1} paddingY={view === 'files' ? 1 : 5} paddingX={1}>
           {dirState.error && view === 'files' && <Text color="red">{dirState.error}</Text>}
@@ -647,6 +776,8 @@ export default function App() {
             ? (taskStatus ?? (pendingKill ? 'Press Esc to cancel' : 'Live — refreshes every 3s'))
             : view === 'launcher'
             ? (launcherStatus ?? 'Select an app to launch it')
+            : view === 'settings-wifi'
+            ? (wifiStatus ?? 'Wi-Fi settings')
             : `Theme: ${palette} | Selected: ${currentItems[selected - 1] ?? ''}`}
         </Text>
       </Box>
