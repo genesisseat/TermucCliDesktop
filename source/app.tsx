@@ -7,18 +7,18 @@ import {execSync} from 'child_process';
 import {Header} from './components/Header.js';
 
 const palettes = {
-  GPT:     { primary: '#10A37F', accent: '#00D9C0' }, // teal-green, GPT-ish
-  CLAUDE:  { primary: '#DA7756', accent: '#F0C674' }, // warm coral / soft gold — better contrast than orange/yellow
-  SAKURA:  { primary: '#FF6FA5', accent: '#FFD6E8' }, // cherry blossom pink / pale pink
-  ROSE:    { primary: '#E8384F', accent: '#FFB6C1' }, // deep rose / light pink (was red/white — too stark)
-  RAIN:    { primary: '#4A90D9', accent: '#8FD3FE' }, // rain blue / sky blue (was blue/magenta — mismatched mood)
-  MATRIX:  { primary: '#00FF41', accent: '#003B00' }, // classic terminal green on dark green
-  MIDNIGHT:{ primary: '#5C6BC0', accent: '#B39DDB' }, // indigo / lavender
-  SUNSET:  { primary: '#FF7E5F', accent: '#FEB47B' }, // orange-red / peach gradient feel
-  MONO:    { primary: '#CCCCCC', accent: '#FFFFFF' }, // grayscale, minimal
-  AMBER:   { primary: '#FFB000', accent: '#664400' }, // old-school amber terminal
-  CYBER:   { primary: '#F72585', accent: '#4CC9F0' }, // cyberpunk pink / cyan
-  FOREST:  { primary: '#2D6A4F', accent: '#95D5B2' }, // deep green / mint
+  GPT:     { primary: '#10A37F', accent: '#00D9C0' },
+  CLAUDE:  { primary: '#DA7756', accent: '#F0C674' },
+  SAKURA:  { primary: '#FF6FA5', accent: '#FFD6E8' },
+  ROSE:    { primary: '#E8384F', accent: '#FFB6C1' },
+  RAIN:    { primary: '#4A90D9', accent: '#8FD3FE' },
+  MATRIX:  { primary: '#00FF41', accent: '#003B00' },
+  MIDNIGHT:{ primary: '#5C6BC0', accent: '#B39DDB' },
+  SUNSET:  { primary: '#FF7E5F', accent: '#FEB47B' },
+  MONO:    { primary: '#CCCCCC', accent: '#FFFFFF' },
+  AMBER:   { primary: '#FFB000', accent: '#664400' },
+  CYBER:   { primary: '#F72585', accent: '#4CC9F0' },
+  FOREST:  { primary: '#2D6A4F', accent: '#95D5B2' },
 };
 
 const HOME = process.env['HOME'] || process.cwd();
@@ -81,10 +81,8 @@ function formatBytes(kb: number): string {
 
 function loadDiskInfo(): { disks: DiskInfo[]; error: string | null } {
   try {
-    // -P = POSIX output format (stable columns, no line-wrapping on long device names)
-    // -k = force sizes in 1024-byte blocks so parsing is predictable across devices
     const raw = execSync('df -Pk', { encoding: 'utf8', timeout: 3000 });
-    const lines = raw.trim().split('\n').slice(1); // drop header row
+    const lines = raw.trim().split('\n').slice(1);
 
     const disks: DiskInfo[] = [];
     const seenMounts = new Set<string>();
@@ -95,9 +93,6 @@ function loadDiskInfo(): { disks: DiskInfo[]; error: string | null } {
       const [, sizeKb, usedKb, availKb, useStr, ...mountParts] = parts;
       const mount = mountParts.join(' ');
 
-      // Filter out virtual/pseudo filesystems that clutter Termux output
-      // (tmpfs, proc, cgroup, etc.) and keep only things a user recognizes
-      // as "storage": internal, emulated (SD/shared), and any /storage/* mounts.
       const isRelevant =
         mount === '/' ||
         mount.includes('/storage') ||
@@ -123,6 +118,74 @@ function loadDiskInfo(): { disks: DiskInfo[]; error: string | null } {
   }
 }
 
+// --- CPU model detection (Android/Termux-safe) ----------------------------
+
+function readCpuModel(): string {
+  try {
+    const cpuinfo = fs.readFileSync('/proc/cpuinfo', 'utf8');
+    const lines = cpuinfo.split('\n');
+
+    const modelLine = lines.find(l => l.toLowerCase().startsWith('model name'));
+    if (modelLine) {
+      const value = modelLine.split(':')[1]?.trim();
+      if (value) return value;
+    }
+
+    const hardwareLine = lines.find(l => l.toLowerCase().startsWith('hardware'));
+    if (hardwareLine) {
+      const value = hardwareLine.split(':')[1]?.trim();
+      if (value) return value;
+    }
+
+    const processorLine = lines.find(l => l.toLowerCase().startsWith('processor'));
+    if (processorLine) {
+      const value = processorLine.split(':')[1]?.trim();
+      if (value) return value;
+    }
+  } catch {
+    // /proc/cpuinfo unreadable — fall through
+  }
+
+  const propKeys = ['ro.soc.model', 'ro.board.platform', 'ro.product.board', 'ro.hardware'];
+  for (const key of propKeys) {
+    try {
+      const value = execSync(`getprop ${key}`, { encoding: 'utf8', timeout: 2000 }).trim();
+      if (value) return value;
+    } catch {
+      // getprop not available or key empty — try next
+    }
+  }
+
+  return 'Unknown CPU';
+}
+
+// --- Memory detection (Android/Termux-safe) --------------------------------
+
+function readMemInfo(): { totalKb: number; availableKb: number } {
+  try {
+    const meminfo = fs.readFileSync('/proc/meminfo', 'utf8');
+    const lines = meminfo.split('\n');
+
+    const getValueKb = (label: string): number | null => {
+      const line = lines.find(l => l.startsWith(label));
+      if (!line) return null;
+      const match = line.match(/(\d+)/);
+      return match ? Number(match[1]) : null;
+    };
+
+    const total = getValueKb('MemTotal:');
+    const available = getValueKb('MemAvailable:') ?? getValueKb('MemFree:');
+
+    if (total !== null && available !== null) {
+      return { totalKb: total, availableKb: available };
+    }
+  } catch {
+    // /proc/meminfo unreadable — fall through
+  }
+
+  return { totalKb: os.totalmem() / 1024, availableKb: os.freemem() / 1024 };
+}
+
 type SystemSnapshot = {
   totalMemKb: number;
   freeMemKb: number;
@@ -136,11 +199,13 @@ type SystemSnapshot = {
 
 function loadSystemSnapshot(): SystemSnapshot {
   const { disks, error: diskError } = loadDiskInfo();
+  const { totalKb, availableKb } = readMemInfo();
   const cpus = os.cpus();
+
   return {
-    totalMemKb: os.totalmem() / 1024,
-    freeMemKb: os.freemem() / 1024,
-    cpuModel: cpus[0]?.model?.trim() || 'Unknown CPU',
+    totalMemKb: totalKb,
+    freeMemKb: availableKb,
+    cpuModel: readCpuModel(),
     cpuCores: cpus.length,
     loadAvg: os.loadavg(),
     uptimeSec: os.uptime(),
@@ -185,7 +250,6 @@ export default function App() {
 
   const [snapshot, setSnapshot] = useState<SystemSnapshot | null>(null);
 
-  // Refresh stats every 2s while the Stats view is open; stop when leaving it.
   useEffect(() => {
     if (view !== 'stats') return;
     setSnapshot(loadSystemSnapshot());
@@ -194,7 +258,8 @@ export default function App() {
   }, [view]);
 
   const mainMenuItems = ['File Manager', 'System Stats', 'Settings', 'Exit'];
-  const settingsItems = ['Palette: GPT', 'Palette: CLAUDE', 'Palette: SAKURA', 'Palette: ROSE', 'Palette: RAIN', 'Back'];
+  // Generated from `palettes` so every theme you add automatically appears here.
+  const settingsItems = [...Object.keys(palettes).map((name) => `Palette: ${name}`), 'Back'];
   const statsMenuItems = ['Back to Menu'];
 
   const terminalWidth = stdout?.columns || 80;
