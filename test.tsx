@@ -1,17 +1,14 @@
-import React from 'react';
-import chalk from 'chalk';
 import test from 'ava';
-import {render} from 'ink-testing-library';
-import App from './source/app.js';
+import {parseBatteryJsonOutput, parseDumpsysBatteryOutput} from './source/components/Header.js';
 
-test('greet unknown user', t => {
-	const {lastFrame} = render(<App name={undefined} />);
+test('parses termux battery JSON with charging status', t => {
+	const parsed = parseBatteryJsonOutput('{"percentage": 78, "status": "CHARGING"}');
 
-	t.is(lastFrame(), `Hello, ${chalk.green('Stranger')}`);
+	t.deepEqual(parsed, {percent: 78, charging: true, error: null});
 });
 
-test('greet user with a name', t => {
-	const {lastFrame} = render(<App name="Jane" />);
+test('parses android dumpsys battery output', t => {
+	const parsed = parseDumpsysBatteryOutput('Battery Status:\n  level: 42\n  AC powered: true');
 
-	t.is(lastFrame(), `Hello, ${chalk.green('Jane')}`);
+	t.deepEqual(parsed, {percent: 42, charging: true, error: null});
 });
