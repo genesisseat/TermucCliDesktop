@@ -12,7 +12,7 @@ export default function App() {
   });
 
   return (
-    <Box flexDirection="column" height={15} borderStyle="single" borderColor="gray">
+    <Box flexDirection="column" height={30} borderStyle="single" borderColor="gray" margin={1}>
       <Header />
       <Box flexDirection="column" flexGrow={1} padding={1}>
         {menuItems.map((item, index) => (
