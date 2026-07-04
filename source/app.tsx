@@ -1,5 +1,7 @@
 import React, {useState} from 'react';
 import {Box, Text, useInput, useApp} from 'ink';
+import fs from 'fs';
+import path from 'path';
 import {Header} from './components/Header.js';
 
 const palettes = {
@@ -10,11 +12,23 @@ const palettes = {
   RAIN: { primary: 'blue', accent: 'magenta' },
 };
 
+// Fixed path access
+const SETTINGS_FILE = path.join(process.env['HOME'] || '', '.jellybean_settings');
+
 export default function App() {
   const {exit} = useApp();
   const [selected, setSelected] = useState(1);
   const [view, setView] = useState('main');
-  const [palette, setPalette] = useState('GPT');
+  const [palette, setPalette] = useState(() => {
+    try {
+      if (fs.existsSync(SETTINGS_FILE)) {
+        return fs.readFileSync(SETTINGS_FILE, 'utf8');
+      }
+    } catch (e) {
+      return 'GPT';
+    }
+    return 'GPT';
+  });
 
   const mainMenuItems = ['File Manager', 'System Stats', 'Settings', 'Exit'];
   const settingsItems = ['Palette: GPT', 'Palette: CLAUDE', 'Palette: SAKURA', 'Palette: ROSE', 'Palette: RAIN', 'Back'];
@@ -22,30 +36,27 @@ export default function App() {
   const currentItems = view === 'main' ? mainMenuItems : settingsItems;
   const currentTheme = palettes[palette as keyof typeof palettes];
 
+  const updatePalette = (newPalette: string) => {
+    setPalette(newPalette);
+    fs.writeFileSync(SETTINGS_FILE, newPalette);
+  };
+
   useInput((_, key) => {
     if (key.upArrow && selected > 1) setSelected(selected - 1);
     if (key.downArrow && selected < currentItems.length) setSelected(selected + 1);
 
     if (key.return) {
       const selectedItem = currentItems[selected - 1];
-
-      // Safety check to prevent undefined errors
       if (!selectedItem) return;
 
       if (view === 'main') {
-        if (selectedItem === 'Settings') { 
-          setView('settings'); 
-          setSelected(1); 
-        }
+        if (selectedItem === 'Settings') { setView('settings'); setSelected(1); }
         if (selectedItem === 'Exit') exit();
       } else {
         if (selectedItem.startsWith('Palette: ')) {
-          setPalette(selectedItem.replace('Palette: ', ''));
+          updatePalette(selectedItem.replace('Palette: ', ''));
         }
-        if (selectedItem === 'Back') { 
-          setView('main'); 
-          setSelected(1); 
-        }
+        if (selectedItem === 'Back') { setView('main'); setSelected(1); }
       }
     }
   });
