@@ -21,7 +21,7 @@ const getBattery = (): string => {
     try {
       const raw = execSync('WMIC PATH Win32_Battery Get EstimatedChargeRemaining', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
       const lines = raw.toString().trim().split('\n');
-      if (lines.length > 1) {
+      if (lines.length > 1 && lines[1]) {
           const pct = lines[1].trim();
           if (pct && !isNaN(Number(pct))) return `${pct}%`;
       }
