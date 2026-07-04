@@ -66,10 +66,24 @@ export const Header = () => {
     };
   }, []);
 
+  function barGraph(percent: number, width: number): string {
+    const clamped = Math.max(0, Math.min(100, percent));
+    const filled = Math.round((clamped / 100) * width);
+    return '█'.repeat(filled) + '░'.repeat(Math.max(0, width - filled));
+  }
+
+  let batteryDisplay = `BAT: ${battery}`;
+  if (battery !== 'N/A' && battery !== '...') {
+    const pct = parseInt(battery.replace('%', ''), 10);
+    if (!isNaN(pct)) {
+      batteryDisplay = `BAT: ${barGraph(pct, 10)} ${battery}`;
+    }
+  }
+
   return (
     <Box borderStyle="single" paddingX={1} justifyContent="space-between">
       <Text bold>GENESIS-OS v1.0</Text>
-      <Text>{time} | BAT: {battery} | STATUS: IDLE</Text>
+      <Text>{time} | {batteryDisplay} | STATUS: IDLE</Text>
     </Box>
   );
 };
