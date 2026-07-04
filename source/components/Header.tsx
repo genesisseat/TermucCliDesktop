@@ -4,36 +4,54 @@ import fs from 'fs';
 import { execSync } from 'child_process';
 
 const getBattery = (): string => {
+  // Generic Linux/Android sysfs check (check multiple possible dirs)
   try {
-    const capacity = fs.readFileSync('/sys/class/power_supply/battery/capacity', 'utf8').trim();
-    if (capacity) return `${capacity}%`;
-  } catch {
-    // Termux
-    try {
-      const raw = execSync('termux-battery-status', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
-      const data = JSON.parse(raw.toString());
-      if (data && typeof data.percentage === 'number') {
-        return `${data.percentage}%`;
+    if (fs.existsSync('/sys/class/power_supply')) {
+      const dirs = fs.readdirSync('/sys/class/power_supply');
+      for (const dir of dirs) {
+        if (dir.toLowerCase().includes('bat') || dir.toLowerCase().includes('bms') || dir.toLowerCase().includes('main')) {
+          try {
+            const capacity = fs.readFileSync(`/sys/class/power_supply/${dir}/capacity`, 'utf8').trim();
+            if (capacity && !isNaN(Number(capacity))) return `${capacity}%`;
+          } catch {}
+        }
       }
-    } catch {}
-    
-    // Windows
-    try {
-      const raw = execSync('WMIC PATH Win32_Battery Get EstimatedChargeRemaining', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
-      const lines = raw.toString().trim().split('\n');
-      if (lines.length > 1 && lines[1]) {
-          const pct = lines[1].trim();
-          if (pct && !isNaN(Number(pct))) return `${pct}%`;
-      }
-    } catch {}
-    
-    // macOS
-    try {
-      const raw = execSync('pmset -g batt', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
-      const match = raw.toString().match(/(\d+)%/);
-      if (match) return `${match[1]}%`;
-    } catch {}
-  }
+    }
+  } catch {}
+
+  // Termux
+  try {
+    const raw = execSync('termux-battery-status', { encoding: 'utf8', timeout: 2000, stdio: 'pipe' });
+    const data = JSON.parse(raw.toString());
+    if (data && typeof data.percentage === 'number') {
+      return `${data.percentage}%`;
+    }
+  } catch {}
+
+  // Android dumpsys fallback
+  try {
+    const raw = execSync('dumpsys battery', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
+    const match = raw.toString().match(/level:\s*(\d+)/);
+    if (match) return `${match[1]}%`;
+  } catch {}
+  
+  // Windows
+  try {
+    const raw = execSync('WMIC PATH Win32_Battery Get EstimatedChargeRemaining', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
+    const lines = raw.toString().trim().split('\n');
+    if (lines.length > 1 && lines[1]) {
+        const pct = lines[1].trim();
+        if (pct && !isNaN(Number(pct))) return `${pct}%`;
+    }
+  } catch {}
+  
+  // macOS
+  try {
+    const raw = execSync('pmset -g batt', { encoding: 'utf8', timeout: 1000, stdio: 'pipe' });
+    const match = raw.toString().match(/(\d+)%/);
+    if (match) return `${match[1]}%`;
+  } catch {}
+
   return 'N/A';
 };
 
