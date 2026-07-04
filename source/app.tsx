@@ -12,16 +12,16 @@ export default function App() {
   });
 
   return (
-    <Box flexDirection="column" height={30} borderStyle="single" borderColor="gray" margin={1}>
+    <Box flexDirection="column" flexGrow={1} borderStyle="single" borderColor="gray">
       <Header />
-      <Box flexDirection="column" flexGrow={1} padding={1}>
+      <Box flexDirection="column" paddingY={2} paddingX={1}>
         {menuItems.map((item, index) => (
           <Text key={item} color={selected === index + 1 ? 'cyan' : 'white'}>
             {selected === index + 1 ? '> ' : '  '} [ {index + 1} ] {item}
           </Text>
         ))}
       </Box>
-      <Box borderStyle="single" paddingX={1}>
+      <Box borderStyle="single" paddingX={1} marginTop={1}>
         <Text>Selected: {menuItems[selected - 1]}</Text>
       </Box>
     </Box>
