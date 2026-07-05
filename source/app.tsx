@@ -736,7 +736,7 @@ export default function App() {
             );
           })}
           <Text color="gray">Press Enter on Connect to Selected after scanning.</Text>
-          <Box marginTop={1}>
+          <Box marginTop={1} flexDirection="column">
             {currentItems.map((item, index) => (
               <Text key={`${item}-${index}`} wrap="truncate-end" color={selected === index + 1 ? currentTheme.accent : 'white'}>
                 {selected === index + 1 ? '> ' : '  '} [ {index + 1} ] {item}
