@@ -104,6 +104,7 @@ const getBatteryInfo = (): BatteryInfo => {
             const cap = parseInt(capStr, 10);
             if (!isNaN(cap)) {
               info.percent = cap;
+              info.error = null; // sysfs succeeded — clear any earlier error tag
               try {
                 const statusStr = fs
                   .readFileSync(`/sys/class/power_supply/${dir}/status`, 'utf8')
@@ -245,9 +246,8 @@ export const Header = () => {
   if (batteryInfo.percent !== null) {
     const icon = batteryInfo.charging ? '⚡' : '';
     batteryDisplay = `BAT: ${icon}${barGraph(batteryInfo.percent, 10)} ${batteryInfo.percent}%`;
-  } else if (batteryInfo.error === 'termux-api failed') {
-    batteryDisplay = `BAT: ERR (pkg install termux-api?)`;
   }
+  // batteryDisplay stays 'BAT: N/A' when no source could provide battery info.
 
   return (
     <Box borderStyle="single" paddingX={1} justifyContent="space-between">
