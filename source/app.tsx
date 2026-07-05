@@ -3,8 +3,9 @@ import {Box, Text, useInput, useApp, useStdout} from 'ink';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import {execSync} from 'child_process';
+import {execFileSync, execSync} from 'child_process';
 import {Header} from './components/Header.js';
+import {barGraph} from './utils.js';
 
 const palettes = {
   GPT:     { primary: '#10A37F', accent: '#00D9C0' },
@@ -176,11 +177,7 @@ function formatUptime(sec: number): string {
   return `${h}h ${m}m`;
 }
 
-function barGraph(percent: number, width: number): string {
-  const clamped = Math.max(0, Math.min(100, percent));
-  const filled = Math.round((clamped / 100) * width);
-  return '█'.repeat(filled) + '░'.repeat(Math.max(0, width - filled));
-}
+// barGraph is imported from './utils.js'
 
 // --- Task Manager helpers ---------------------------------------------------
 
@@ -288,8 +285,10 @@ function toggleWifi(enabled: boolean): { success: boolean; message: string } {
 
 function connectToWifi(ssid: string, password?: string): { success: boolean; message: string } {
   try {
-    const command = password ? `termux-wifi-connect ${ssid} ${password}` : `termux-wifi-connect ${ssid}`;
-    execSync(command, { encoding: 'utf8', timeout: 6000 });
+    // Use execFileSync with an argument array so that the SSID and password
+    // are never interpolated into a shell string — prevents command injection.
+    const args = password ? [ssid, password] : [ssid];
+    execFileSync('termux-wifi-connect', args, { encoding: 'utf8', timeout: 6000 });
     return { success: true, message: `Connecting to ${ssid}` };
   } catch {
     return { success: false, message: `Unable to connect to ${ssid}` };
